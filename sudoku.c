@@ -7,7 +7,7 @@
  * constraint propagation method (http://norvig.com/sudoku.html).
  *
  * This was one of the problems used during the 11th Marathon of Parallel Programming
- * http://lspd.mackenzie.br/marathon/current/index.html
+ * http://lspd.mackenzie.br/marathon/16/index.html
  */
 
 
