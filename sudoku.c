@@ -16,6 +16,11 @@
 #include <assert.h>
 #include <limits.h>
 
+#include<pthread.h>
+#include<unistd.h>
+#include <sys/syscall.h>
+
+#define NUM_THREADS 4
 #define INT_TYPE unsigned long long 
 #define INT_TYPE_SIZE (sizeof(INT_TYPE) * 8)
 #define CELL_VAL_SIZE 1
@@ -25,6 +30,7 @@
 enum SOLVE_STRATEGY {SUDOKU_SOLVE, SUDOKU_COUNT_SOLS};
 #ifndef SUDOKU_SOLVE_STRATEGY
 #define SUDOKU_SOLVE_STRATEGY SUDOKU_SOLVE
+//#define SUDOKU_SOLVE_STRATEGY SUDOKU_COUNT_SOLS
 #endif
 
 #define BUILD_ERROR_IF(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
@@ -52,6 +58,25 @@ typedef struct sudoku {
     
     unsigned long long sol_count;
 } sudoku;
+
+
+
+
+int GLOBAL_SIZE;
+int GLOBAL_DIM;
+int THREAD_CHUNCK_SIZE;
+
+struct thread_info {    
+   pthread_t thread;       
+   int       thread_app_id; //thread id defined in the aplication       
+   sudoku     *sudoku;
+};
+
+
+struct thread_info threads[NUM_THREADS];
+pthread_attr_t attr;
+pthread_attr_t *attrp;      /* NULL or &attr */
+
 
 static int assign (sudoku *s, int i, int j, int d);
 
@@ -109,12 +134,19 @@ static void destroy_sudoku(sudoku *s) {
 
 static void init(sudoku *s) {
     int i, j, k, l, pos;
-    
+    int inferior_limit, superior_limit;
+/*
+    inferior_limit = pthread_self() * THREAD_CHUNCK_SIZE;
+    superior_limit = (pthread_self() + 1)  * THREAD_CHUNCK_SIZE;
+*/    
+    inferior_limit = 0;
+    superior_limit = s->dim;
+
     //unit list 
-    for (i = 0; i < s->dim; i++) {
+    for (i = inferior_limit; i < superior_limit; i++) {
         int ibase = i / s->bdim * s->bdim;
-        for (j = 0; j < s->dim; j++) {
-            for (pos = 0; pos < s->dim; pos++) {
+        for (j = inferior_limit; j < superior_limit; j++) {
+            for (pos = inferior_limit; pos < superior_limit; pos++) {
                 s->unit_list[i][j][0][pos].r = i; //row 
                 s->unit_list[i][j][0][pos].c = pos;
                 s->unit_list[i][j][1][pos].r = pos; //column
@@ -130,14 +162,14 @@ static void init(sudoku *s) {
     }
     
     //peers
-    for (i = 0; i < s->dim; i++)
-        for (j = 0; j < s->dim; j++) {
+    for (i = inferior_limit; i < superior_limit; i++)
+        for (j = inferior_limit; j < superior_limit; j++) {
             pos = 0;
-            for (k = 0; k < s->dim; k++) { //row
+            for (k = inferior_limit; k < superior_limit; k++) { //row
                 if (s->unit_list[i][j][0][k].c != j)
                     s->peers[i][j][pos++] = s->unit_list[i][j][0][k]; 
             }
-            for (k = 0; k < s->dim; k++) { 
+            for (k = inferior_limit; k < superior_limit; k++) { 
                 cell_coord sq = s->unit_list[i][j][1][k]; //column
                 if (sq.r != i)
                     s->peers[i][j][pos++] = sq; 
@@ -170,24 +202,41 @@ static int parse_grid(sudoku *s) {
     return 1;
 }
 
-static sudoku *create_sudoku(int bdim, int *grid) {
+/*void * allocate_sudoku(void * arg) {
+    
+    struct thread_info * ti = arg;
+    sudoku * r = ti->sudoku;
+    int id = ti->thread_app_id;
+    
+    
+    pthread_exit(NULL);
+}*/
+
+static sudoku *create_sudoku(int *grid) {
+    int bdim = GLOBAL_SIZE;
+    sudoku *r = malloc(sizeof(sudoku));
+
     assert(bdim <= MAX_BDIM);
     
-    sudoku *r = malloc(sizeof(sudoku));
     r->bdim = bdim;
-    int dim = bdim * bdim;
+    int dim = GLOBAL_DIM;
     r->dim = dim;
     r->peers_size = 3 * dim - 2 * bdim - 1;
     r->grid = grid;
     r->sol_count = 0;
-    
+
+    int inferior_limit, superior_limit;
+
+    inferior_limit = 0;
+    superior_limit = dim;
+
     //[r][c][0 - row, 1 - column, 2 - box]//[r][c][0 - row, 1 - column, 2 - box][ix]
-    r->unit_list = malloc(sizeof(cell_coord***) * dim);
+    r->unit_list = malloc(sizeof(cell_coord***) * dim); //TODO: Tentar alocar com THREAD_CHUNCK_SIZE
     assert(r->unit_list);
-    for (int i = 0; i < dim; i++) {
+    for (int i = inferior_limit; i < superior_limit; i++) {
         r->unit_list[i] = malloc(sizeof(cell_coord**) * dim);
         assert (r->unit_list[i]);
-        for (int j = 0; j < dim; j++) {
+        for (int j = inferior_limit; j < superior_limit; j++) {
             r->unit_list[i][j] = malloc(sizeof(cell_coord*) * 3);
             assert(r->unit_list[i][j]);
             for (int k = 0; k < 3; k++) {
@@ -197,23 +246,39 @@ static sudoku *create_sudoku(int bdim, int *grid) {
         }
     }
     
+
     r->peers = malloc(sizeof(cell_coord**) * dim);
     assert(r->peers);
-    for (int i = 0; i < dim; i++) {
+    for (int i = inferior_limit; i < superior_limit; i++) {
         r->peers[i] = malloc(sizeof(cell_coord*) * dim);
         assert(r->peers[i]);
-        for (int j = 0; j < dim; j++) {
+        for (int j = inferior_limit; j < superior_limit; j++) {
             r->peers[i][j] = calloc(r->peers_size, sizeof(cell_coord));
             assert(r->peers[i][j]);
         }
     }
+
     
     r->values = malloc (sizeof(cell_v*) * dim);
     assert(r->values);
-    for (int i = 0; i < dim; i++) {
+    for (int i = inferior_limit; i < superior_limit; i++) {
         r->values[i] = calloc(dim, sizeof(cell_v));
         assert(r->values[i]);
     }
+
+
+/*  
+    for (int i = 0; i < NUM_THREADS; i++) {
+        threads[i].sudoku = r;
+        threads[i].thread_app_id = i;
+        //pthread_mutex_lock(&cria);
+        //valor = i;
+        pthread_create(&threads[i].thread, NULL, allocate_sudoku, &threads[i]);
+    
+    }   
+    for(int i = 0; i < NUM_THREADS; i++)
+        pthread_join(threads[i].thread, NULL);*/
+
     
     init(r);
     if (!parse_grid(r)) {
@@ -284,15 +349,20 @@ static int search (sudoku *s, int status) {
 
     int solved = 1;
     for (i = 0; solved && i < s->dim; i++) 
-        for (j = 0; j < s->dim; j++) 
-            if (cell_v_count(&s->values[i][j]) != 1) {
+        for (j = 0; j < s->dim; j++) {
+            int cell_count = cell_v_count(&s->values[i][j]); 
+            if (cell_count != 1) {
                 solved = 0;
                 break;
             }
+        }
+    
+    
     if (solved) {
         s->sol_count++;
         return SUDOKU_SOLVE_STRATEGY == SUDOKU_SOLVE;
     }
+
 
     //ok, there is still some work to be done
     int min = INT_MAX;
@@ -304,6 +374,7 @@ static int search (sudoku *s, int status) {
     for (i = 0; i < s->dim; i++)
         values_bkp[i] = malloc (sizeof (cell_v) * s->dim);
     
+    //TODO: ao invés de sempre tentar colocar o menor número, colocar um número escolhido aleatoriamente.
     for (i = 0; i < s->dim; i++) 
         for (j = 0; j < s->dim; j++) {
             int used = cell_v_count(&s->values[i][j]);
@@ -322,7 +393,7 @@ static int search (sudoku *s, int status) {
             
             if (search (s, assign(s, minI, minJ, k))) {
                 ret = 1;
-                goto FR_RT;
+                break;
             } else {
                 for (i = 0; i < s->dim; i++) 
                     for (j = 0; j < s->dim; j++)
@@ -331,7 +402,6 @@ static int search (sudoku *s, int status) {
         }
     }
     
-    FR_RT:
     for (i = 0; i < s->dim; i++)
         free(values_bkp[i]);
     free (values_bkp);
@@ -339,29 +409,38 @@ static int search (sudoku *s, int status) {
     return ret;
 }
 
-int solve(sudoku *s) {
-    return search(s, 1);
-}
+void copy_sudoku(sudoku *new, sudoku *old) {
+    new->bdim = old->bdim;
+    new->dim = old->dim;
+    new->peers_size = old->peers_size;
+    new->grid = old->grid;
+    new->sol_count = old->sol_count;
 
-int main (int argc, char **argv) {
+    new->unit_list = old->unit_list; //shallow copy
+    new->peers = old->peers; //shallow copy
 
-    int size;
-    assert(scanf("%d", &size) == 1);
-    assert (size <= MAX_BDIM);
-    int buf_size = size * size * size * size;
-    int buf[buf_size];
+    //deep copy
+    new->values = malloc (sizeof(cell_v*) * old->dim);
+    assert(new->values);
+    for (int i = 0; i < old->dim; i++) {
+        new->values[i] = calloc(old->dim, sizeof(cell_v));
+        assert(new->values[i]);
+    }
 
-    for (int i = 0; i < buf_size; i++) {
-        if (scanf("%d", &buf[i]) != 1) {
-            printf("error reading file (%d)\n", i);
-            exit(1);
+    for (int i = 0; i < old->dim; i++) {
+        for (int j = 0; j < old->dim; j++) {
+            new->values[i][j] = old->values[i][j];
+            //cell_v_set(&new->values[i][j], digit_get(&old->values[i][j]));
         }
     }
 
-    sudoku *s = create_sudoku(size, buf);
-    if (s) {
-        solve(s);
-        if (s->sol_count) {
+} 
+
+void *solve(void *arg) {
+    sudoku *s = malloc(sizeof(sudoku));
+    s = (sudoku *) arg;
+    search(s, 1);
+    if (s->sol_count) {
             switch (SUDOKU_SOLVE_STRATEGY) {
                 case SUDOKU_SOLVE:
                     display(s);
@@ -374,8 +453,66 @@ int main (int argc, char **argv) {
             }
         } else {
             printf("Could not solve puzzle.\n");
+    }
+
+    exit(0);
+}
+
+int main (int argc, char **argv) {
+
+    int size;
+    assert(scanf("%d", &size) == 1);
+    assert (size <= MAX_BDIM);
+    int buf_size = size * size * size * size;
+    int buf[buf_size];
+
+    GLOBAL_SIZE = size;
+    GLOBAL_DIM = size * size;
+    THREAD_CHUNCK_SIZE = (int) GLOBAL_DIM/NUM_THREADS;
+
+    for (int i = 0; i < buf_size; i++) {
+        if (scanf("%d", &buf[i]) != 1) {
+            printf("error reading file (%d)\n", i);
+            exit(1);
         }
-        destroy_sudoku(s);
+    }
+
+    sudoku *s = create_sudoku(buf);
+
+    attrp = &attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if (s) {
+        sudoku * new_sudoku[NUM_THREADS];
+
+        for (int i = 0; i < NUM_THREADS; i++)
+        {
+            new_sudoku[i] = malloc(sizeof(sudoku));
+            //new_sudoku[i] = create_sudoku(buf);
+            
+            copy_sudoku(new_sudoku[i], s);
+            //display(new_sudoku[i]);
+            //display(s);
+
+            pthread_create(&threads[i].thread, attrp, solve, &new_sudoku[i]);
+          //  destroy_sudoku(new_sudoku[i]);
+
+        }
+/*        if (s->sol_count) {
+            switch (SUDOKU_SOLVE_STRATEGY) {
+                case SUDOKU_SOLVE:
+                    display(s);
+                    break;
+                case SUDOKU_COUNT_SOLS: 
+                    printf("%lld\n", s->sol_count);
+                    break;
+                default:
+                    assert(0);
+            }
+        } else {
+            printf("Could not solve puzzle.\n");
+        }*/
+        //destroy_sudoku(s); // FIXME: Usar o destroy_sudoku
     } else {
         printf("Could not load puzzle.\n");
     }
