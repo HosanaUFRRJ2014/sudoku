@@ -152,9 +152,10 @@ static void init(sudoku *s) {
 static int parse_grid(sudoku *s) {
     int i = 0, j = 0, k = 0, l = 1;
     int ld_vals[s->dim][s->dim];
+    int grid_parsed = 1; //se o programa pode parsear o grid
 
     /*Redução de quantidade de loops também*/
-    #pragma omp parallel shared(s, ld_vals, k) private(i, j, l)
+    #pragma omp parallel shared(s, ld_vals, k, grid_parsed) private(i, j, l)
     {
         #pragma omp for ordered
             for (i = 0; i < s->dim; i++) {
@@ -166,20 +167,24 @@ static int parse_grid(sudoku *s) {
                     }
 
                     for (l = 1; l <= s->dim; l++) {
-                        printf("i: %d, j: %d, l: %d\n", i, j, l);
+                     //   printf("i: %d, j: %d, l: %d\n", i, j, l);
                         cell_v_set(&s->values[i][j], l);
+                    }                    
+                }
+            }
+
+        #pragma omp for
+            for (i = 0; i < s->dim; i++) {
+                for (j = 0; j < s->dim; j++) {
+                    if (ld_vals[i][j] > 0 && !assign(s, i, j, ld_vals[i][j])) {
+                        grid_parsed = 0;
+                     //   exit(1);
                     }
-                    
                 }
             }    
     }
-
-    for (i = 0; i < s->dim; i++)
-        for (j = 0; j < s->dim; j++)
-            if (ld_vals[i][j] > 0 && !assign(s, i, j, ld_vals[i][j]))
-                return 0;
-
-    return 1;
+ 
+    return grid_parsed;
 }
 
 static sudoku *create_sudoku(int bdim, int *grid) {
