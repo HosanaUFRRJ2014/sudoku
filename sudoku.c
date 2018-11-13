@@ -152,10 +152,14 @@ static void init(sudoku *s) {
 static int parse_grid(sudoku *s) {
     int i, j, k;
     int ld_vals[s->dim][s->dim];
-    for (k = 0, i = 0; i < s->dim; i++)
-        for (j = 0; j < s->dim; j++, k++) {
+    k = 0;
+    for (i = 0; i < s->dim; i++) {
+        for (j = 0; j < s->dim; j++) {
             ld_vals[i][j] = s->grid[k];
+            k++;
         }
+    }
+        
     
     for (i = 0; i < s->dim; i++)
         for (j = 0; j < s->dim; j++)
