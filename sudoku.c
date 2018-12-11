@@ -10,8 +10,8 @@
  * http://lspd.mackenzie.br/marathon/16/index.html
  */
 
-
 #include <stdio.h>
+//#include <mpi.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <limits.h>
@@ -268,9 +268,10 @@ static int eliminate (sudoku *s, int i, int j, int d) {
 
 static int assign (sudoku *s, int i, int j, int d) {
     for (int d2 = 1; d2 <= s->dim; d2++)
-        if (d2 != d) 
+        if (d2 != d) {
             if (!eliminate(s, i, j, d2))
                return 0;
+        }
     return 1;
 }
 
@@ -283,65 +284,160 @@ static void display(sudoku *s) {
 
 static int search (sudoku *s, int status) {
     int i, j, k;
-
-    if (!status) return status;
-
-    int solved = 1;
-    for (i = 0; solved && i < s->dim; i++) 
-        for (j = 0; j < s->dim; j++) 
-            if (cell_v_count(&s->values[i][j]) != 1) {
-                solved = 0;
-                break;
-            }
-    if (solved) {
-        s->sol_count++;
-        return SUDOKU_SOLVE_STRATEGY == SUDOKU_SOLVE;
-    }
-
-    //ok, there is still some work to be done
-    int min = INT_MAX;
-    int minI = -1;
-    int minJ = -1;
+    int return_value = 0;
     int ret = 0;
-    
+    int assigned = status;
+
     cell_v **values_bkp = malloc (sizeof (cell_v *) * s->dim);
     for (i = 0; i < s->dim; i++)
         values_bkp[i] = malloc (sizeof (cell_v) * s->dim);
-    
-    for (i = 0; i < s->dim; i++) 
-        for (j = 0; j < s->dim; j++) {
-            int used = cell_v_count(&s->values[i][j]);
-            if (used > 1 && used < min) {
-                min = used;
-                minI = i;
-                minJ = j;
+
+    for (k = 1; k <= s->dim; k++)
+    {
+
+
+        return_value = 0;
+        
+        //ok, there is still some work to be done
+        int min = INT_MAX;
+        int minI = -1;
+        int minJ = -1;
+        
+        
+        for (i = 0; i < s->dim; i++) 
+            for (j = 0; j < s->dim; j++) {
+                int used = cell_v_count(&s->values[i][j]);
+                if (used > 1 && used < min) {
+                    min = used;
+                    minI = i;
+                    minJ = j;
+                }
             }
-        }
-            
-    for (k = 1; k <= s->dim; k++) {
+
+
         if (cell_v_get(&s->values[minI][minJ], k))  {
             for (i = 0; i < s->dim; i++)
                 for (j = 0; j < s->dim; j++)
                     values_bkp[i][j] = s->values[i][j];
             
-            if (search (s, assign(s, minI, minJ, k))) {
+            assigned = assign(s, minI, minJ, k);
+            if ( assigned /*search(s, assigned)*/) {
+                //return_value = 1;
                 ret = 1;
-                goto FR_RT;
+              //  break;
             } else {
                 for (i = 0; i < s->dim; i++) 
                     for (j = 0; j < s->dim; j++)
                         s->values[i][j] = values_bkp[i][j];
             }
         }
+
+        //if (!status) return status;
+        if (!assigned) {
+            return_value = assigned; //break ou continue???
+         //   continue;
+        }
+        else {
+            int solved = 1;
+            for (i = 0; solved && i < s->dim; i++) 
+                for (j = 0; j < s->dim; j++) 
+                    if (cell_v_count(&s->values[i][j]) != 1) {
+                        solved = 0;
+                        break;
+                    }
+            if (solved) {
+                s->sol_count++;
+                return_value = SUDOKU_SOLVE_STRATEGY == SUDOKU_SOLVE;
+                //break or continue????
+            }
+        }
+
+        ret = return_value;
+
+        if (return_value)
+        {
+            break;
+        }
+
     }
+
+            
+    /*for (k = 1; k <= s->dim; k++) {
+
+    }*/
     
-    FR_RT:
+    //TODO: Pode ser que removendo aqui ganhe desempenho e não quebre o código
     for (i = 0; i < s->dim; i++)
         free(values_bkp[i]);
     free (values_bkp);
     
     return ret;
 }
+
+
+
+// static int search (sudoku *s, int status) {
+//     int i, j, k;
+
+//     if (!status) return status;
+
+//     int solved = 1;
+//     for (i = 0; solved && i < s->dim; i++) 
+//         for (j = 0; j < s->dim; j++) 
+//             if (cell_v_count(&s->values[i][j]) != 1) {
+//                 solved = 0;
+//                 break;
+//             }
+//     if (solved) {
+//         s->sol_count++;
+//         return SUDOKU_SOLVE_STRATEGY == SUDOKU_SOLVE;
+//     }
+
+//     //ok, there is still some work to be done
+//     int min = INT_MAX;
+//     int minI = -1;
+//     int minJ = -1;
+//     int ret = 0;
+    
+//     cell_v **values_bkp = malloc (sizeof (cell_v *) * s->dim);
+//     for (i = 0; i < s->dim; i++)
+//         values_bkp[i] = malloc (sizeof (cell_v) * s->dim);
+    
+//     for (i = 0; i < s->dim; i++) 
+//         for (j = 0; j < s->dim; j++) {
+//             int used = cell_v_count(&s->values[i][j]);
+//             if (used > 1 && used < min) {
+//                 min = used;
+//                 minI = i;
+//                 minJ = j;
+//             }
+//         }
+            
+//     for (k = 1; k <= s->dim; k++) {
+//         if (cell_v_get(&s->values[minI][minJ], k))  {
+//             for (i = 0; i < s->dim; i++)
+//                 for (j = 0; j < s->dim; j++)
+//                     values_bkp[i][j] = s->values[i][j];
+            
+//             int assigned = assign(s, minI, minJ, k);
+//             if (search(s, assigned)) {
+//                 ret = 1;
+//                 break;
+//             } else {
+//                 for (i = 0; i < s->dim; i++) 
+//                     for (j = 0; j < s->dim; j++)
+//                         s->values[i][j] = values_bkp[i][j];
+//             }
+//         }
+//     }
+    
+//     //TODO: Pode ser que removendo aqui ganhe desempenho e não quebre o código
+//     for (i = 0; i < s->dim; i++)
+//         free(values_bkp[i]);
+//     free (values_bkp);
+    
+//     return ret;
+// }
 
 int solve(sudoku *s) {
     return search(s, 1);
