@@ -16,6 +16,7 @@
 #include <assert.h>
 #include <limits.h>
 
+# define STACK_SIZE 1000000
 #define INT_TYPE unsigned long long 
 #define INT_TYPE_SIZE (sizeof(INT_TYPE) * 8)
 #define CELL_VAL_SIZE 1
@@ -282,27 +283,83 @@ static void display(sudoku *s) {
             printf("%d ",  digit_get(&s->values[i][j]));
 }
 
+int isempty(int top) {
+
+   if(top == -1)
+      return 1;
+   else
+      return 0;
+}
+   
+int isfull(int top) {
+
+   if(top == STACK_SIZE)
+      return 1;
+   else
+      return 0;
+}
+
+int pop(int *stack, int *top) {
+   int data;
+    
+   if(!isempty(*top)) {
+      data = stack[*top];
+      *top = *top - 1;   
+      return data;
+   } else {
+      printf("Could not retrieve data, Stack is empty.\n");
+   }
+
+   return -1;
+}
+
+void push(int *stack, int *top, int data) {
+
+   if(!isfull(*top)) {
+      *top = *top + 1;   
+      stack[*top] = data;
+   } else {
+      printf("Could not insert data, Stack is full.\n");
+   }
+
+}
+
+
 static int search (sudoku *s, int status) {
     int i, j, k;
-    int return_value = 0;
+    int stack[STACK_SIZE], top = -1;
     int ret = 0;
-    int assigned = status;
 
-    cell_v **values_bkp = malloc (sizeof (cell_v *) * s->dim);
-    for (i = 0; i < s->dim; i++)
-        values_bkp[i] = malloc (sizeof (cell_v) * s->dim);
+    push(stack, &top, status);
 
-    for (k = 1; k <= s->dim; k++)
-    {
+    while(!isempty(top)) {
 
+        status = pop(stack, &top);
+        // if (!status) //return status;
+        //     push(stack, &top, status);
 
-        return_value = 0;
-        
+        int solved = 1;
+        for (i = 0; solved && i < s->dim; i++) 
+            for (j = 0; j < s->dim; j++) 
+                if (cell_v_count(&s->values[i][j]) != 1) {
+                    solved = 0;
+                    break;
+                }
+        if (solved) {
+            s->sol_count++;
+           // push(stack, &top, SUDOKU_SOLVE_STRATEGY == SUDOKU_SOLVE);
+            return SUDOKU_SOLVE_STRATEGY == SUDOKU_SOLVE;
+        }
+
         //ok, there is still some work to be done
         int min = INT_MAX;
         int minI = -1;
         int minJ = -1;
+        //int ret = 0;
         
+        cell_v **values_bkp = malloc (sizeof (cell_v *) * s->dim);
+        for (i = 0; i < s->dim; i++)
+            values_bkp[i] = malloc (sizeof (cell_v) * s->dim);
         
         for (i = 0; i < s->dim; i++) 
             for (j = 0; j < s->dim; j++) {
@@ -313,63 +370,36 @@ static int search (sudoku *s, int status) {
                     minJ = j;
                 }
             }
-
-
-        if (cell_v_get(&s->values[minI][minJ], k))  {
-            for (i = 0; i < s->dim; i++)
-                for (j = 0; j < s->dim; j++)
-                    values_bkp[i][j] = s->values[i][j];
-            
-            assigned = assign(s, minI, minJ, k);
-            if ( assigned /*search(s, assigned)*/) {
-                //return_value = 1;
-                ret = 1;
-              //  break;
-            } else {
-                for (i = 0; i < s->dim; i++) 
+                
+        for (k = 1; k <= s->dim; k++) {
+            if (cell_v_get(&s->values[minI][minJ], k))  {
+                for (i = 0; i < s->dim; i++)
                     for (j = 0; j < s->dim; j++)
-                        s->values[i][j] = values_bkp[i][j];
+                        values_bkp[i][j] = s->values[i][j];
+                
+                int assigned = assign(s, minI, minJ, k);
+                printf("assigned: %d\n", assigned);
+                push(stack, &top, assigned);
+                //int found = search(s, assigned);
+                if (status/*assigned*//*found*/) {
+                    ret = 1;
+                    //break;
+                } else {
+                    ret = 0;
+                    for (i = 0; i < s->dim; i++) 
+                        for (j = 0; j < s->dim; j++)
+                            s->values[i][j] = values_bkp[i][j];
+                }
             }
         }
-
-        //if (!status) return status;
-        if (!assigned) {
-            return_value = assigned; //break ou continue???
-         //   continue;
-        }
-        else {
-            int solved = 1;
-            for (i = 0; solved && i < s->dim; i++) 
-                for (j = 0; j < s->dim; j++) 
-                    if (cell_v_count(&s->values[i][j]) != 1) {
-                        solved = 0;
-                        break;
-                    }
-            if (solved) {
-                s->sol_count++;
-                return_value = SUDOKU_SOLVE_STRATEGY == SUDOKU_SOLVE;
-                //break or continue????
-            }
-        }
-
-        ret = return_value;
-
-        if (return_value)
-        {
-            break;
-        }
+        
+        //TODO: Pode ser que removendo aqui ganhe desempenho e não quebre o código
+        for (i = 0; i < s->dim; i++)
+            free(values_bkp[i]);
+        free (values_bkp);
+        
 
     }
-
-            
-    /*for (k = 1; k <= s->dim; k++) {
-
-    }*/
-    
-    //TODO: Pode ser que removendo aqui ganhe desempenho e não quebre o código
-    for (i = 0; i < s->dim; i++)
-        free(values_bkp[i]);
-    free (values_bkp);
     
     return ret;
 }
