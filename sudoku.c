@@ -11,11 +11,14 @@
  */
 
 #include <omp.h>
+#include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
 #include <limits.h>
 
+//#define PROCESSORS_NUM 2
+#define MASTER 1
 #define INT_TYPE unsigned long long 
 #define INT_TYPE_SIZE (sizeof(INT_TYPE) * 8)
 #define CELL_VAL_SIZE 1
@@ -52,6 +55,10 @@ typedef struct sudoku {
     
     unsigned long long sol_count;
 } sudoku;
+
+
+int rank = -1;
+int numtasks = 0;
 
 static int assign (sudoku *s, int i, int j, int d);
 
@@ -172,18 +179,35 @@ static int parse_grid(sudoku *s) {
                     }                    
                 }
             }
-
-        #pragma omp for
-            for (i = 0; i < s->dim; i++) {
-                for (j = 0; j < s->dim; j++) {
-                    if (ld_vals[i][j] > 0 && !assign(s, i, j, ld_vals[i][j])) {
-                        grid_parsed = 0;
-                     //   exit(1);
-                    }
-                }
-            }    
     }
- 
+
+    int partial_ld_vals[s->dim];
+    int sendcount = s->dim;
+    int recvcount = s->dim;
+    MPI_Scatter(
+        ld_vals, sendcount, MPI_INT,
+        partial_ld_vals, recvcount, MPI_INT,
+        MASTER, MPI_COMM_WORLD
+    );
+
+//#pragma omp for
+    for (i = 0; i < s->dim; i++) {
+    //    for (j = 0; j < s->dim; j++) {
+            if (partial_ld_vals[i]/*[j]*/ > 0) {
+                int assigned = assign(s, i, rank, partial_ld_vals[i]/*[j]*/);
+                if (!assigned)
+                    grid_parsed = 0;
+            }
+      //  }
+    }    
+
+
+    MPI_Gather (
+        &partial_ld_vals, sendcount, MPI_INT,
+        &ld_vals, recvcount, MPI_INT,
+        MASTER, MPI_COMM_WORLD
+    ); 
+
     return grid_parsed;
 }
 
@@ -339,7 +363,7 @@ static int search (sudoku *s, int status) {
             
             if (search (s, assign(s, minI, minJ, k))) {
                 ret = 1;
-                goto FR_RT;
+                break;
             } else {
                 for (i = 0; i < s->dim; i++) 
                     for (j = 0; j < s->dim; j++)
@@ -348,7 +372,6 @@ static int search (sudoku *s, int status) {
         }
     }
     
-    FR_RT:
     for (i = 0; i < s->dim; i++)
         free(values_bkp[i]);
     free (values_bkp);
@@ -361,21 +384,41 @@ int solve(sudoku *s) {
 }
 
 int main (int argc, char **argv) {
-
     int size;
-    assert(scanf("%d", &size) == 1);
+    FILE *fp;
+
+    fp = fopen( argv[1], "r");
+    if (fp == NULL)
+    {
+        printf("Impossible to open file %s\n", argv[1]);
+        exit(1);
+    }
+    assert(fscanf(fp, "%d", &size) == 1);
     assert (size <= MAX_BDIM);
     int buf_size = size * size * size * size;
     int buf[buf_size];
 
     for (int i = 0; i < buf_size; i++) {
-        if (scanf("%d", &buf[i]) != 1) {
+        if (fscanf(fp, "%d", &buf[i]) != 1) {
             printf("error reading file (%d)\n", i);
             exit(1);
         }
     }
 
+    MPI_Init(&argc,&argv);
+
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &numtasks);
+
+
+    if (numtasks != size)
+    {
+        printf("Must especify %d processors (Size of the puzzle)\n", size);
+        exit(1);
+    }
+
     sudoku *s = create_sudoku(size, buf);
+    MPI_Finalize();
     if (s) {
         solve(s);
         if (s->sol_count) {
@@ -396,6 +439,8 @@ int main (int argc, char **argv) {
     } else {
         printf("Could not load puzzle.\n");
     }
+
+    fclose(fp);
 
     return 0;
 }
